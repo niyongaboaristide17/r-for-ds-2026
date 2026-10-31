@@ -1,0 +1,219 @@
+---
+title: "Assignment 1 - 20252MBI042"
+author: "Aristide N."
+date: "2026-10-25"
+output: html_document
+---
+
+# Assignment 1: Importing Data into R
+
+This assignment demonstrates how to import data from several common sources in R, including Excel files, statistical package formats, text/XML/web sources, and databases.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r install-packages}
+required_packages <- c("readxl", "writexl", "foreign", "haven", "rvest", "xml2", "jsonlite", "DBI", "RSQLite")
+for (pkg in required_packages) {
+  if (!requireNamespace(pkg, quietly = TRUE)) {
+    install.packages(pkg, repos = "https://cloud.r-project.org")
+  }
+}
+
+library(readxl)
+library(writexl)
+library(foreign)
+library(haven)
+library(rvest)
+library(xml2)
+library(jsonlite)
+library(DBI)
+library(RSQLite)
+```
+
+```{r create-folder}
+dir.create("datasets", showWarnings = FALSE)
+```
+
+## Package guide
+
+The following R packages were installed to support the data import examples in this assignment:
+
+- `readxl`: reads Excel files (`.xlsx`, `.xls`)
+- `writexl`: writes data to Excel files
+- `foreign`: reads older statistical files such as SAS and SPSS data files
+- `haven`: reads and writes SAS, SPSS, and Stata files
+- `rvest`: scrapes HTML content from web pages
+- `xml2`: reads and writes XML files
+- `jsonlite`: reads and writes JSON files
+- `DBI`: provides a common interface for database connections
+- `RSQLite`: connects R to SQLite databases
+
+## Data generation: create all datasets first
+
+```{r seed-all-datasets}
+students <- data.frame(
+  student_id = 1:4,
+  name = c("Alice", "Bob", "Charlie", "Diana"),
+  age = c(20, 22, 21, 23),
+  score = c(88, 91, 85, 94)
+)
+
+write_xlsx(students, path = "datasets/students.xlsx")
+write_xpt(students, path = "datasets/students_sas.xpt")
+write_sav(students, path = "datasets/students_spss.sav")
+write.dta(students, file = "datasets/students_stata.dta")
+
+write.table(
+  students,
+  file = "datasets/students.txt",
+  sep = ",",
+  row.names = FALSE,
+  col.names = TRUE
+)
+
+json_data <- jsonlite::toJSON(split(students, seq_len(nrow(students))), pretty = TRUE)
+writeLines(json_data, "datasets/students.json")
+
+xml_content <- '<?xml version="1.0" encoding="UTF-8"?>
+<students>
+  <student>
+    <student_id>1</student_id>
+    <name>Alice</name>
+    <age>20</age>
+    <score>88</score>
+  </student>
+  <student>
+    <student_id>2</student_id>
+    <name>Bob</name>
+    <age>22</age>
+    <score>91</score>
+  </student>
+  <student>
+    <student_id>3</student_id>
+    <name>Charlie</name>
+    <age>21</age>
+    <score>85</score>
+  </student>
+</students>'
+
+write_xml(read_xml(charToRaw(xml_content)), "datasets/students.xml")
+
+con <- dbConnect(RSQLite::SQLite(), "datasets/students.db")
+dbWriteTable(con, "students", students, overwrite = TRUE)
+dbDisconnect(con)
+```
+
+## 1. Loading data from Excel
+
+Excel files are commonly used in business and research settings. The `readxl` package can read `.xls` and `.xlsx` files.
+
+```{r excel-import}
+# Read the Excel file into R for analysis.
+excel_data <- read_excel("datasets/students.xlsx")
+print(excel_data)
+```
+
+## 2. Loading data from statistical packages (SAS, SPSS, Stata)
+
+Different statistical software stores datasets in different formats. Below are examples for SAS transport files, SPSS `.sav` files, and Stata `.dta` files.
+
+### SAS transport file
+
+```{r sas-import}
+# Import a SAS transport file using the haven package.
+sas_data <- read_xpt("datasets/students_sas.xpt")
+print(sas_data)
+```
+
+### SPSS file
+
+```{r spss-import}
+# Import an SPSS dataset saved in .sav format.
+spss_data <- read_sav("datasets/students_spss.sav")
+print(spss_data)
+```
+
+### Stata file
+
+```{r stata-import}
+# Import a Stata dataset stored in .dta format.
+stata_data <- read.dta("datasets/students_stata.dta")
+print(stata_data)
+```
+
+## 3. Loading data from text files, JSON, XML, and web scraping
+
+### Text file (ASCII/CSV)
+
+```{r text-file-import}
+# CSV files can be read directly with read.csv().
+text_data_csv <- read.csv("datasets/students.txt")
+print(text_data_csv[, c("student_id", "age", "score")])
+
+# read.table() is a more general option when the separator must be specified.
+text_data_table <- read.table("datasets/students.txt", header = TRUE, sep = ",")
+print(text_data_table[, c("student_id", "age", "score")])
+```
+
+### JSON file
+
+```{r json-import}
+# Read the JSON file and convert it into a data frame.
+json_data <- jsonlite::fromJSON("datasets/students.json")
+student_df_json <- do.call(rbind, lapply(json_data, function(x) as.data.frame(x, stringsAsFactors = FALSE)))
+print(student_df_json)
+```
+
+### XML file
+
+```{r xml-import}
+# Read the XML file and convert the student nodes into a data frame.
+parsed_xml <- read_xml("datasets/students.xml")
+student_nodes <- xml_find_all(parsed_xml, "//student")
+student_df <- do.call(rbind, lapply(student_nodes, function(node) {
+  data.frame(
+    student_id = as.integer(xml_text(xml_find_first(node, "student_id"))),
+    name = xml_text(xml_find_first(node, "name")),
+    age = as.integer(xml_text(xml_find_first(node, "age"))),
+    score = as.integer(xml_text(xml_find_first(node, "score"))),
+    stringsAsFactors = FALSE
+  )
+}))
+print(student_df)
+```
+
+### Web scraping
+
+```{r web-scraping}
+# Web scraping reads page content from a URL and extracts the title.
+web_page <- read_html("https://example.com")
+page_title <- html_text(html_nodes(web_page, "title"))
+print(page_title)
+```
+
+## 4. Loading data from a database management system
+
+A database is often used to store large amounts of structured data. In this example, we create a SQLite database and query it using R.
+
+```{r database-import}
+# Connect to the SQLite database and query the table.
+con <- dbConnect(RSQLite::SQLite(), "datasets/students.db")
+result <- dbGetQuery(con, "SELECT * FROM students")
+print(result)
+dbDisconnect(con)
+```
+
+## Conclusion
+
+R provides a wide range of tools to import datasets from different source formats. Common examples include:
+
+- Excel files with `readxl`
+- Statistical software files with `foreign` and `haven`
+- Text files with `read.csv()` and `read.table()`
+- XML and HTML/web sources with `xml2` and `rvest`
+- Databases with `DBI` and `RSQLite`
+
+These methods allow analysts to bring data into R efficiently for cleaning, transformation, and analysis.
+

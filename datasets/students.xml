@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<students>
+  <student>
+    <student_id>1</student_id>
+    <name>Alice</name>
+    <age>20</age>
+    <score>88</score>
+  </student>
+  <student>
+    <student_id>2</student_id>
+    <name>Bob</name>
+    <age>22</age>
+    <score>91</score>
+  </student>
+  <student>
+    <student_id>3</student_id>
+    <name>Charlie</name>
+    <age>21</age>
+    <score>85</score>
+  </student>
+</students>
