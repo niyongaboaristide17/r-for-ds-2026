@@ -1,6 +1,6 @@
 ---
-title: "R-For-DS"
-author: "Aristide NIYONGABO - 20252MBI042"
+title: "Assignment 1 - 20252MBI042"
+author: "Aristide N."
 date: "2026-10-31"
 output: html_document
 ---
