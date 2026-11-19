@@ -1,0 +1,215 @@
+---
+title: "Assignment 4 - Multiple Linear Regression"
+author: "Aristide N. - 20252MBI042"
+date: "November 2026"
+output: html_document
+---
+
+## Research question
+
+Do country population characteristics and continent help explain differences
+in per-capita CO2 emissions? This analysis uses multiple linear regression to
+study the association between 2019 CO2 emissions per person and population
+size, population density, annual population growth, and continent.
+
+The analysis is observational: its results describe associations and do not
+show that population characteristics cause emissions to change.
+
+## Data and preparation
+
+The analysis combines the repository's `CO2_emission.csv` and
+`world_population.csv` files using their three-letter country codes. The
+emissions file contains CO2 emissions in metric tons per person and has two
+columns labeled 2019; the first is used. Population size, density, growth
+rate, and continent come from the population file. Rows missing any analysis
+variable, and rows with non-positive values for a logged variable, are
+excluded.
+
+```{r prepare-data}
+population <- read.csv("datasets/world_population.csv", check.names = FALSE)
+emissions_raw <- read.csv("datasets/CO2_emission.csv", check.names = FALSE)
+
+year_2019 <- which(names(emissions_raw) == "2019")
+if (length(year_2019) == 0) {
+  stop("The emissions dataset does not contain a 2019 column.")
+}
+if (length(year_2019) > 1 &&
+    !isTRUE(all.equal(
+      emissions_raw[[year_2019[1]]],
+      emissions_raw[[year_2019[2]]],
+      check.attributes = FALSE
+    ))) {
+  stop("The duplicate 2019 emissions columns do not match.")
+}
+
+if (anyDuplicated(population$CCA3) || anyDuplicated(emissions_raw$country_code)) {
+  stop("Country codes must be unique within each dataset.")
+}
+
+population_for_join <- data.frame(
+  code = population$CCA3,
+  population_2022 = population[["2022 Population"]],
+  density = population[["Density (per km²)"]],
+  growth_factor = population[["Growth Rate"]],
+  continent = population$Continent
+)
+emissions_for_join <- data.frame(
+  code = emissions_raw$country_code,
+  co2_per_capita_2019 = emissions_raw[[year_2019[1]]]
+)
+
+joined <- merge(population_for_join, emissions_for_join, by = "code")
+analysis_data <- joined[
+  complete.cases(joined) &
+    joined$population_2022 > 0 &
+    joined$density > 0 &
+    joined$co2_per_capita_2019 > 0,
+]
+analysis_data$continent <- relevel(
+  factor(analysis_data$continent),
+  ref = "Africa"
+)
+analysis_data$log_co2 <- log(analysis_data$co2_per_capita_2019)
+analysis_data$log_population <- log(analysis_data$population_2022)
+analysis_data$log_density <- log(analysis_data$density)
+analysis_data$growth_percent <- (analysis_data$growth_factor - 1) * 100
+
+if (nrow(analysis_data) == 0) {
+  stop("No complete, positive observations are available for the model.")
+}
+
+model <- lm(
+  log_co2 ~ log_population + log_density + growth_percent + continent,
+  data = analysis_data
+)
+model_summary <- summary(model)
+```
+
+The model contains `r nrow(analysis_data)` countries. Its response is the
+natural logarithm of 2019 per-capita emissions. Natural logarithms are used
+for emissions, population size, and density because these measures span wide
+ranges and emissions are right-skewed. The growth-rate variable is expressed
+as an annual percentage (for example, a growth factor of 1.02 is 2%).
+
+## Model
+
+The fitted model is:
+
+\[
+\log(\text{CO2 per capita}) =
+\beta_0 + \beta_1\log(\text{population}) +
+\beta_2\log(\text{density}) + \beta_3(\text{growth percent}) +
+\text{continent effects} + \epsilon.
+\]
+
+Africa is the reference continent. Each coefficient estimates the association
+with emissions while holding the other variables in the model constant.
+
+```{r model-results}
+coefficient_table <- as.data.frame(coef(model_summary))
+coefficient_table$term <- rownames(coefficient_table)
+confidence_intervals <- confint(model)
+coefficient_table$lower_95 <- confidence_intervals[
+  coefficient_table$term, 1
+]
+coefficient_table$upper_95 <- confidence_intervals[
+  coefficient_table$term, 2
+]
+rownames(coefficient_table) <- NULL
+names(coefficient_table) <- c(
+  "Estimate", "Std. error", "t value", "p value", "Term",
+  "95% CI lower", "95% CI upper"
+)
+coefficient_table <- coefficient_table[
+  , c("Term", "Estimate", "Std. error", "95% CI lower", "95% CI upper", "p value")
+]
+
+knitr::kable(
+  coefficient_table,
+  digits = 3,
+  caption = "Multiple regression coefficients and 95% confidence intervals"
+)
+```
+
+The model explains `r sprintf("%.1f", 100 * model_summary$r.squared)`% of
+the variation in log emissions (adjusted \(R^2\) =
+`r sprintf("%.3f", model_summary$adj.r.squared)`). The predictors are
+statistically associated with the response overall
+(\(F\) = `r sprintf("%.2f", model_summary$fstatistic[1])`,
+\(p\) = `r format.pval(
+pf(model_summary$fstatistic[1], model_summary$fstatistic[2],
+   model_summary$fstatistic[3], lower.tail = FALSE),
+digits = 3
+)`).
+
+### Interpreting the coefficients
+
+Because both emissions and population size are logged, the population
+coefficient is an elasticity: a 1% increase in population is associated with
+approximately a `r sprintf("%.2f", coef(model)["log_population"])`% change in
+per-capita emissions, conditional on the other predictors. This association
+is not statistically significant at the 5% level (\(p\) =
+`r sprintf("%.3f", coef(model_summary)["log_population", "Pr(>|t|)"])`), so
+these data do not provide clear evidence of an independent population-size
+association after adjustment.
+
+Likewise, a 1% increase in population density is associated with an
+approximate `r sprintf("%.2f", coef(model)["log_density"])`% change in
+per-capita emissions, holding the remaining variables constant. The
+estimated association is negative and statistically significant at the 5%
+level (\(p\) =
+`r sprintf("%.3f", coef(model_summary)["log_density", "Pr(>|t|)"])`).
+
+For annual growth, a one-percentage-point increase is associated with an
+estimated `r sprintf("%.1f", 100 * (exp(coef(model)["growth_percent"]) - 1))`%
+change in per-capita emissions, with other predictors held constant. The
+estimated association is negative (\(p\) =
+`r format.pval(
+coef(model_summary)["growth_percent", "Pr(>|t|)"],
+digits = 3
+)`). This describes a conditional association in this sample, not a causal
+effect.
+
+The continent coefficients compare each continent with Africa after
+adjustment for the numeric predictors. For example, the model's estimated
+emissions ratio for Asia versus Africa is
+`r sprintf("%.2f", exp(coef(model)["continentAsia"]))` to 1. The coefficient
+table gives the corresponding estimates and confidence intervals for all
+continents; these contrasts should not be interpreted as causal effects or as
+within-continent comparisons.
+
+## Model checks
+
+Residual-versus-fitted and normal Q-Q plots are used to look for conspicuous
+non-linearity, changing residual spread, or departures from normally
+distributed errors. These plots are diagnostic aids rather than proof that
+all model assumptions hold.
+
+```{r diagnostics, fig.width=7, fig.height=3.5}
+par(mfrow = c(1, 2))
+plot(
+  fitted(model), resid(model),
+  xlab = "Fitted log emissions",
+  ylab = "Residuals",
+  main = "Residuals vs fitted"
+)
+abline(h = 0, lty = 2, col = "red")
+qqnorm(resid(model), main = "Normal Q-Q plot")
+qqline(resid(model), col = "red")
+par(mfrow = c(1, 1))
+```
+
+## Conclusion and limitations
+
+In this sample, density, annual population growth, and adjusted continent
+contrasts show evidence of association with 2019 per-capita CO2 emissions;
+the model does not find a statistically significant independent association
+for population size at the 5% level. The \(R^2\) indicates that other
+country-level factors remain important.
+
+The data are cross-sectional, countries may differ in omitted factors such as
+energy sources, industrial structure, and income, and the population
+characteristics are from 2022 while emissions are from 2019. The analysis
+therefore supports association statements only, and the time mismatch and
+unmeasured confounding limit interpretation. Results also apply only to
+countries with complete data in both files.
